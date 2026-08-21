@@ -9,6 +9,7 @@ from pathlib import Path
 from .core import (
     SynchroError, apply_restore, init_repo, load_selection, repository_status,
     restore_plan, run_git, save_selection, snapshot, test_remote, user_config_path,
+    plugin_seed_plan,
     validate_remote, validate_repo_path,
 )
 
@@ -97,7 +98,7 @@ def main(plugin_root: Path | None = None, argv=None) -> int:
             emit(repository_status(repo), args.json); return 0
         if args.command == "snapshot":
             summary, changes = snapshot(repo, home, args.apply)
-            emit({"mode": "applied" if args.apply else "preview", "summary": summary, "changes": changes, "next": "Review with git diff; Synchro never commits or pushes."}, args.json); return 0
+            emit({"mode": "applied" if args.apply else "preview", "summary": summary, "changes": changes, "repositoryStatus": repository_status(repo), "next": "Review with git diff; Synchro never commits or pushes."}, args.json); return 0
         if args.command == "restore":
             plan = restore_plan(repo, home, args.include_device)
             backup = str(apply_restore(plan, home)) if args.apply and plan else None
@@ -111,9 +112,10 @@ def main(plugin_root: Path | None = None, argv=None) -> int:
                 "mime": "Preview MIME/application defaults.", "reload": "List affected components without restarting them.",
                 "report": "Report device settings, secrets, and manual steps that cannot be restored.",
             }
+            if args.stage == "plugins":
+                emit(plugin_seed_plan(repo, home), args.json); return 0
             emit({"mode": "plan", "selectedStage": args.stage, "stages": [{"name": stage, "description": detail[stage]} for stage in stages]}, args.json); return 0
     except (SynchroError, OSError, ValueError) as exc:
         emit({"error": str(exc)} if args.json else f"Error: {exc}", args.json)
         return 2
     return 0
-

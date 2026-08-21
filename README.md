@@ -10,6 +10,7 @@ Omarchy Synchro is a distributable Codex plugin, Omarchy Shell widget/native ove
 - Synchro never stages, commits, or pushes.
 - SSH/HTTPS remotes use existing Git authentication; credential-bearing URLs are rejected.
 - `/usr/share/omarchy` is never captured or modified.
+- Third-party Omarchy plugins are captured as declarations (public origin, revision, enabled state, placement, and settings), never as working trees.
 
 ## First use
 
@@ -45,6 +46,18 @@ Device data is excluded unless `--include-device` is explicitly supplied.
 ## Local install and uninstall
 
 Run `scripts/install-local` only after both plugin validators and tests pass. `scripts/uninstall-local` removes the Shell integration but preserves the selected configuration repository and `~/.config/omarchy/omarchy-synchro.json`.
+
+## Native overlay
+
+Click the Synchro top-bar widget to open the native dashboard:
+
+- **Overview** summarizes branch, dirty files, ahead/behind counts, remote state, repository path, and origin.
+- **Setup** selects or initializes the configuration repository and sets, replaces, displays, tests, or removes `origin`.
+- **Snapshot** previews capture changes before a separately confirmed apply.
+- **Restore** defaults to a portable-only dry run, with device files opt-in and apply separately confirmed.
+- **Seed** presents the staged new-laptop workflow.
+
+Snapshot manifests include `plugins.json` and `shell.json`. The plugin seed stage identifies installed, missing, and manual-source plugins without installing anything. Local filesystem origins are deliberately omitted and reported as manual steps.
 
 ## Tests
 

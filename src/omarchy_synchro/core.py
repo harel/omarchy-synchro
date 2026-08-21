@@ -263,11 +263,114 @@ def build_snapshot(repo: Path, home: Path, stage: Path) -> dict:
         for args, name in ((["pacman", "-Qqen"], "native.txt"), (["pacman", "-Qqem"], "aur.txt")):
             result = subprocess.run(args, text=True, capture_output=True, check=True)
             (manifests / name).write_text("".join(f"{line}\n" for line in sorted(result.stdout.splitlines())))
+    shell_path = home / ".config/omarchy/shell.json"
+    if shell_path.is_file():
+        if content_secret_reason(shell_path):
+            raise SynchroError("shell.json contains credential-like content and was not captured")
+        shell_data = json.loads(shell_path.read_text())
+        (manifests / "shell.json").write_text(json.dumps(shell_data, indent=2) + "\n")
+    plugins = collect_plugins(home, shell_path)
+    (manifests / "plugins.json").write_text(json.dumps({"schema": 1, "plugins": plugins}, indent=2) + "\n")
     metadata = stage / "metadata"
     metadata.mkdir(parents=True, exist_ok=True)
     summary = {"schema": 1, "deviceId": device_id, "files": count}
     (metadata / "snapshot.json").write_text(json.dumps(summary, indent=2) + "\n")
     return summary
+
+
+def _shell_locations(shell_data: dict) -> dict[str, dict]:
+    locations: dict[str, dict] = {}
+    layout = shell_data.get("bar", {}).get("layout", {})
+    for section in ("left", "center", "right"):
+        for index, raw in enumerate(layout.get(section, [])):
+            entry = raw if isinstance(raw, dict) else {"id": str(raw)}
+            plugin_id = str(entry.get("id", ""))
+            if plugin_id:
+                locations[plugin_id] = {
+                    "kind": "bar", "section": section, "index": index,
+                    "settings": {key: value for key, value in entry.items() if key != "id"},
+                }
+    for index, entry in enumerate(shell_data.get("plugins", [])):
+        if isinstance(entry, dict) and entry.get("id"):
+            locations[str(entry["id"])] = {
+                "kind": "plugin", "index": index,
+                "settings": {key: value for key, value in entry.items() if key != "id"},
+            }
+    return locations
+
+
+def collect_plugins(home: Path, shell_path: Path | None = None) -> list[dict]:
+    plugins_dir = home / ".config/omarchy/plugins"
+    shell_path = shell_path or home / ".config/omarchy/shell.json"
+    try:
+        shell_data = json.loads(shell_path.read_text())
+    except (OSError, ValueError):
+        shell_data = {}
+    locations = _shell_locations(shell_data)
+    disabled = set(shell_data.get("disabledPlugins") or [])
+    output: list[dict] = []
+    if not plugins_dir.is_dir():
+        return output
+    for path in sorted(plugins_dir.iterdir(), key=lambda item: item.name):
+        manifest_path = path / "manifest.json"
+        if path.name == "harel.omarchy-synchro" or not manifest_path.is_file():
+            continue
+        try:
+            manifest = json.loads(manifest_path.read_text())
+        except (OSError, ValueError):
+            continue
+        plugin_id = str(manifest.get("id", path.name))
+        remote_result = run_git(path.resolve(), "remote", "get-url", "origin", check=False)
+        raw_remote = remote_result.stdout.strip() if remote_result.returncode == 0 else ""
+        portable_remote = None
+        if raw_remote:
+            try:
+                portable_remote = validate_remote(raw_remote)
+            except SynchroError:
+                portable_remote = None
+        revision_result = run_git(path.resolve(), "rev-parse", "HEAD", check=False)
+        entry = {
+            "id": plugin_id,
+            "name": str(manifest.get("name", plugin_id)),
+            "version": str(manifest.get("version", "")),
+            "source": portable_remote,
+            "sourceState": "portable" if portable_remote else "manual",
+            "revision": revision_result.stdout.strip() if revision_result.returncode == 0 else None,
+            "enabled": plugin_id in locations and plugin_id not in disabled,
+            "placement": locations.get(plugin_id),
+        }
+        if not portable_remote:
+            entry["manualStep"] = "Configure a portable SSH or HTTPS Git origin before seeding another machine."
+        output.append(entry)
+    return output
+
+
+def plugin_seed_plan(repo: Path, home: Path) -> dict:
+    manifest_path = repo / "manifests/plugins.json"
+    if not manifest_path.is_file():
+        return {"stage": "plugins", "actions": [], "manual": ["No plugin manifest is present; apply a fresh snapshot first."]}
+    data = json.loads(manifest_path.read_text())
+    installed = home / ".config/omarchy/plugins"
+    actions = []
+    manual = []
+    for plugin in data.get("plugins", []):
+        plugin_id = str(plugin.get("id", ""))
+        if not plugin_id:
+            continue
+        if (installed / plugin_id / "manifest.json").is_file():
+            state = "installed"
+        elif plugin.get("source"):
+            state = "missing"
+        else:
+            state = "manual"
+        actions.append({
+            "id": plugin_id, "state": state, "source": plugin.get("source"),
+            "enabled": bool(plugin.get("enabled")), "placement": plugin.get("placement"),
+            "revision": plugin.get("revision"),
+        })
+        if state == "manual":
+            manual.append(f"{plugin_id}: {plugin.get('manualStep', 'portable source required')}")
+    return {"stage": "plugins", "mode": "preview", "actions": actions, "manual": manual}
 
 
 def tree_changes(source: Path, destination: Path) -> list[str]:

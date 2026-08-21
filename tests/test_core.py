@@ -6,7 +6,7 @@ import subprocess
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from omarchy_synchro.core import SynchroError, parse_allowlist, restore_plan, save_selection, secret_reason, snapshot, validate_remote, validate_repo_path
+from omarchy_synchro.core import SynchroError, collect_plugins, parse_allowlist, plugin_seed_plan, restore_plan, save_selection, secret_reason, snapshot, validate_remote, validate_repo_path
 
 
 class SafetyTests(unittest.TestCase):
@@ -58,6 +58,37 @@ class SafetyTests(unittest.TestCase):
             source=repo/"portable/home/.config/app/config"; source.parent.mkdir(parents=True); source.write_text("x")
             plan=restore_plan(repo,home)
             self.assertEqual(len(plan),1); self.assertFalse((home/".config").exists())
+
+    def test_plugin_manifest_captures_declarations_not_worktrees(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp); home=root/"home"; plugin=home/".config/omarchy/plugins/example.widget"
+            plugin.mkdir(parents=True); (plugin/"manifest.json").write_text('{"id":"example.widget","name":"Example","version":"1.2.3"}')
+            subprocess.run(["git","init","-q",str(plugin)],check=True)
+            subprocess.run(["git","-C",str(plugin),"remote","add","origin","https://github.com/example/widget.git"],check=True)
+            shell=home/".config/omarchy/shell.json"
+            shell.write_text('{"bar":{"layout":{"left":[],"center":[],"right":[{"id":"example.widget","rate":5}]}},"plugins":[]}')
+            plugins=collect_plugins(home,shell)
+            self.assertEqual(plugins[0]["source"],"https://github.com/example/widget.git")
+            self.assertEqual(plugins[0]["placement"]["settings"],{"rate":5})
+            self.assertNotIn("workingTree",plugins[0])
+
+    def test_plugin_seed_is_preview_only(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp); repo=root/"repo"; home=root/"home"; (repo/"manifests").mkdir(parents=True); home.mkdir()
+            (repo/"manifests/plugins.json").write_text('{"schema":1,"plugins":[{"id":"example.widget","source":"https://github.com/example/widget.git","enabled":true}]}')
+            plan=plugin_seed_plan(repo,home)
+            self.assertEqual(plan["mode"],"preview"); self.assertEqual(plan["actions"][0]["state"],"missing")
+            self.assertFalse((home/".config").exists())
+
+    def test_snapshot_cli_reports_pending_git_state(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp); home=root/"home"; plugin=root/"plugin"; repo=root/"repo"
+            home.mkdir(); plugin.mkdir(); repo.mkdir(); subprocess.run(["git","init","-q","-b","main",str(repo)],check=True)
+            (repo/"policy").mkdir(); (repo/"policy/allowlist.tsv").write_text("portable\t.config/app.conf\n")
+            for name in ("portable","device","manifests","metadata"): (repo/name).mkdir()
+            (repo/"pending.txt").write_text("review me")
+            status=__import__('omarchy_synchro.core',fromlist=['repository_status']).repository_status(repo)
+            self.assertIn("?? pending.txt",status["dirtyFiles"])
 
 
 if __name__ == "__main__": unittest.main()
