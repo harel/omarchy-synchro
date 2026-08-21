@@ -7,9 +7,9 @@ import subprocess
 from pathlib import Path
 
 from .core import (
-    SynchroError, apply_restore, init_repo, load_selection, repository_status,
+    SynchroError, apply_restore, commit_snapshot, init_repo, load_selection, repository_status,
     restore_plan, run_git, save_selection, snapshot, test_remote, user_config_path,
-    plugin_seed_plan,
+    plugin_seed_plan, push_snapshot, seed_stage_plan,
     validate_remote, validate_repo_path,
 )
 
@@ -25,6 +25,8 @@ def parser() -> argparse.ArgumentParser:
     repo = commands.add_parser("repo")
     repo_sub = repo.add_subparsers(dest="action", required=True)
     repo_sub.add_parser("init")
+    commit = repo_sub.add_parser("commit"); commit.add_argument("--message", "-m", required=True)
+    repo_sub.add_parser("push")
     origin = repo_sub.add_parser("origin")
     origin_sub = origin.add_subparsers(dest="origin_action", required=True)
     for name in ("set", "test"):
@@ -69,6 +71,10 @@ def main(plugin_root: Path | None = None, argv=None) -> int:
             if args.action == "init":
                 init_repo(repo, plugin_root / "templates/allowlist.tsv")
                 emit({"initialized": str(repo)}, args.json)
+            elif args.action == "commit":
+                emit(commit_snapshot(repo, args.message), args.json)
+            elif args.action == "push":
+                emit(push_snapshot(repo), args.json)
             elif args.action == "open":
                 subprocess.Popen(["xdg-terminal-exec", f"--dir={repo}"], start_new_session=True)
                 emit("Configuration repository opened.", args.json)
@@ -104,17 +110,7 @@ def main(plugin_root: Path | None = None, argv=None) -> int:
             backup = str(apply_restore(plan, home)) if args.apply and plan else None
             emit({"mode": "applied" if args.apply else "dry-run", "changes": [{"source": str(s), "destination": str(d), "scope": scope} for s,d,scope in plan], "backup": backup}, args.json); return 0
         if args.command == "seed":
-            stages = ["check", "restore", "packages", "plugins", "mime", "reload", "report"]
-            detail = {
-                "check": "Verify Omarchy and repository compatibility.", "restore": "Preview portable configuration restoration.",
-                "packages": "Identify missing native and AUR packages; installation requires a later explicit action.",
-                "plugins": "Identify declared third-party plugins; installation requires approval.",
-                "mime": "Preview MIME/application defaults.", "reload": "List affected components without restarting them.",
-                "report": "Report device settings, secrets, and manual steps that cannot be restored.",
-            }
-            if args.stage == "plugins":
-                emit(plugin_seed_plan(repo, home), args.json); return 0
-            emit({"mode": "plan", "selectedStage": args.stage, "stages": [{"name": stage, "description": detail[stage]} for stage in stages]}, args.json); return 0
+            emit(seed_stage_plan(repo, home, args.stage), args.json); return 0
     except (SynchroError, OSError, ValueError) as exc:
         emit({"error": str(exc)} if args.json else f"Error: {exc}", args.json)
         return 2

@@ -30,6 +30,7 @@ Item {
   property int behind: 0
   property bool includeDevice: false
   property bool easterEggOpen: false
+  property string commitMessage: "Update Omarchy configuration"
   property string confirmAction: ""
 
   readonly property color background: Color.menu.background
@@ -81,6 +82,20 @@ Item {
 
   function refresh() { run("status", ["--json", "status"]) }
 
+  function showSeedHelp() {
+    detail = [
+      "CHECK\n  Verify the base Omarchy installation, selected repository, and snapshot schema.",
+      "RESTORE\n  Preview portable configuration files that would change. Nothing is applied.",
+      "PACKAGES\n  Compare declared native and AUR packages with what is installed.",
+      "PLUGINS\n  Report installed, missing, and manual-source third-party Omarchy plugins.",
+      "MIME\n  Compare saved MIME and default-application settings with this machine.",
+      "RELOAD\n  Identify Shell, Hyprland, or terminal components that would need reloading.",
+      "REPORT\n  List device-specific files, excluded secrets, and remaining manual steps."
+    ].join("\n\n")
+    actionFailed = false
+    message = "Seed stage help"
+  }
+
   function parse(raw) {
     try { return JSON.parse(String(raw || "{}")) }
     catch (error) { return null }
@@ -103,6 +118,9 @@ Item {
   function friendlyOutput(data, raw) {
     if (!data) return raw || "No output"
     if (data.error) return String(data.error)
+    if (data.commit) return "Committed managed snapshot changes.\n\n" + String(data.commit) + "\n" + String(data.message || "") + "\n\nNothing was pushed."
+    if (data.pushed) return "Pushed branch " + String(data.pushed) + " to\n" + String(data.origin || "origin") + "."
+    if (data.lines) return data.lines.join("\n\n")
     if (data.summary && data.repositoryStatus) {
       var snapshotLines = ["LIVE CONFIGURATION"]
       if (data.changes && data.changes.length) {
@@ -154,6 +172,12 @@ Item {
     } else if (kind === "restore") {
       confirmDialog.message = "Apply the previewed configuration to this laptop? Existing files will be backed up first."
       confirmDialog.confirmText = "Apply restore"
+    } else if (kind === "commit") {
+      confirmDialog.message = "Stage only Synchro-managed snapshot and policy paths, then commit them with this message?\n\n" + commitMessage
+      confirmDialog.confirmText = "Commit snapshot"
+    } else if (kind === "push") {
+      confirmDialog.message = "Push committed configuration history to the configured origin? Uncommitted files will not be included."
+      confirmDialog.confirmText = "Push commits"
     } else {
       confirmDialog.message = "Remove origin from the configuration repository? Files and commits will not be changed."
       confirmDialog.confirmText = "Remove origin"
@@ -164,6 +188,8 @@ Item {
   function runConfirmed() {
     confirmDialog.opened = false
     if (confirmAction === "snapshot") run("snapshot-apply", ["--json", "snapshot", "--apply"])
+    else if (confirmAction === "commit") run("repo-commit", ["--json", "repo", "commit", "--message", commitMessage.trim()])
+    else if (confirmAction === "push") run("repo-push", ["--json", "repo", "push"])
     else if (confirmAction === "restore") {
       var restoreArgs = ["--json", "restore", "--apply"]
       if (includeDevice) restoreArgs.push("--include-device")
@@ -414,7 +440,15 @@ Item {
                     Button { text: "Apply reviewed snapshot"; bordered: true; foreground: root.accent; accent: root.accent; enabled: !process.running; onClicked: root.requestConfirmation("snapshot") }
                     Button { text: "Open repository"; bordered: true; onClicked: root.run("repo-open", ["repo", "open"]) }
                   }
-                  OutputPanel { width: parent.width; height: parent.height - Style.space(105); title: "Snapshot preview"; content: root.detail; foreground: root.foreground; muted: root.muted; borderColor: root.border; fontFamily: root.fontFamily }
+                  Rectangle { width: parent.width; height: 1; color: root.border }
+                  RowLayout {
+                    width: parent.width
+                    spacing: Style.space(8)
+                    TextField { Layout.fillWidth: true; text: root.commitMessage; placeholderText: "Commit message"; onTextChanged: root.commitMessage = text }
+                    Button { text: "Commit snapshot"; bordered: true; enabled: root.commitMessage.trim() !== "" && root.dirty > 0 && !process.running; onClicked: root.requestConfirmation("commit") }
+                    Button { text: "Push commits"; bordered: true; enabled: root.origin !== "" && !process.running; onClicked: root.requestConfirmation("push") }
+                  }
+                  OutputPanel { width: parent.width; height: parent.height - Style.space(165); title: "Snapshot and Git review"; content: root.detail; foreground: root.foreground; muted: root.muted; borderColor: root.border; fontFamily: root.fontFamily }
                 }
 
                 Column {
@@ -436,6 +470,7 @@ Item {
                   spacing: Style.space(12)
                   Text { width: parent.width; text: "A staged, approval-first plan for preparing another Omarchy laptop. Package and plugin installation remain separate approval boundaries."; color: root.muted; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall; wrapMode: Text.WordWrap }
                   Row { spacing: Style.space(6)
+                    Button { text: "󰋖  Help"; bordered: true; onClicked: root.showSeedHelp() }
                     Repeater {
                       model: ["check", "restore", "packages", "plugins", "mime", "reload", "report"]
                       Button { required property string modelData; text: modelData; bordered: true; enabled: !process.running; onClicked: root.run("seed", ["--json", "seed", "--stage", modelData]) }
@@ -565,7 +600,9 @@ Item {
         root.origin = data && data.origin ? String(data.origin) : ""
         root.originDraft = root.origin
         root.message = root.origin === "" ? "No origin is configured." : "Origin loaded."
-      } else if (!root.actionFailed && ["repo-init", "origin-set", "origin-remove", "snapshot-apply"].indexOf(root.action) >= 0) {
+      } else if (root.action === "seed" && !root.actionFailed) {
+        root.message = data && data.summary ? String(data.summary) : "Seed stage preview loaded."
+      } else if (!root.actionFailed && ["repo-init", "origin-set", "origin-remove", "snapshot-apply", "repo-commit", "repo-push"].indexOf(root.action) >= 0) {
         Qt.callLater(root.refresh)
       }
     }

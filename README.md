@@ -2,12 +2,14 @@
 
 Omarchy Synchro is a distributable Codex plugin, Omarchy Shell widget/native overlay, and standalone CLI. Reusable source stays in this repository; every user's private snapshot lives in a separately selected Git repository.
 
+![Omarchy Synchro native overlay](assets/omarchy-synchro.png)
+
 ## Safety contract
 
 - Explicit allowlist with mandatory secret-name/content, cache, browser, keyring, nested-Git, and plugin-tree exclusions.
 - Portable and device-specific captures are separated.
 - Snapshot and restore default to previews. Applying either requires `--apply`.
-- Synchro never stages, commits, or pushes.
+- Snapshot never stages, commits, or pushes; Git commit and push are separate, explicitly confirmed actions.
 - SSH/HTTPS remotes use existing Git authentication; credential-bearing URLs are rejected.
 - `/usr/share/omarchy` is never captured or modified.
 - Third-party Omarchy plugins are captured as declarations (public origin, revision, enabled state, placement, and settings), never as working trees.
@@ -37,7 +39,7 @@ Device data is excluded unless `--include-device` is explicitly supplied.
 
 ## Git operations
 
-`repo origin show|set|test|remove` manages only `origin`. Synchro exposes ahead/behind and dirty state, but deliberately has no commit or push command.
+`repo origin show|set|test|remove` manages only `origin`. Synchro exposes ahead/behind and dirty state. `repo commit --message MESSAGE` stages only managed snapshot/policy paths, and `repo push` pushes committed history; both are separately confirmed in the overlay and neither runs as part of snapshot.
 
 ## New laptop seed
 
@@ -58,6 +60,8 @@ Click the Synchro top-bar widget to open the native dashboard:
 - **Seed** presents the staged new-laptop workflow.
 
 Snapshot manifests include `plugins.json` and `shell.json`. The plugin seed stage identifies installed, missing, and manual-source plugins without installing anything. Local filesystem origins are deliberately omitted and reported as manual steps.
+
+Every Seed screen stage runs a real read-only diagnostic: base/schema compatibility, portable restore delta, missing native/AUR packages, plugin state, MIME-default comparison, required component reloads, or device/secret/manual-step reporting. A successful preview never implies that changes were applied.
 
 ## Tests
 

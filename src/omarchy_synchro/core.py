@@ -20,6 +20,7 @@ class SynchroError(RuntimeError):
 
 CONFIG_NAME = "omarchy-synchro.json"
 MANAGED_DIRS = ("portable", "device", "manifests", "metadata")
+COMMIT_PATHS = (*MANAGED_DIRS, "policy", "README.md", ".gitignore")
 SECRET_PARTS = {
     ".ssh", ".gnupg", ".password-store", "keyring", "keyrings", "credentials",
     "secrets", "tokens", "cookies", "browser", "browsers", "cache", "caches",
@@ -348,7 +349,7 @@ def collect_plugins(home: Path, shell_path: Path | None = None) -> list[dict]:
 def plugin_seed_plan(repo: Path, home: Path) -> dict:
     manifest_path = repo / "manifests/plugins.json"
     if not manifest_path.is_file():
-        return {"stage": "plugins", "actions": [], "manual": ["No plugin manifest is present; apply a fresh snapshot first."]}
+        return {"stage": "plugins", "mode": "preview", "summary": "No plugin manifest is present.", "actions": [], "manual": ["Apply a fresh snapshot first."]}
     data = json.loads(manifest_path.read_text())
     installed = home / ".config/omarchy/plugins"
     actions = []
@@ -370,7 +371,82 @@ def plugin_seed_plan(repo: Path, home: Path) -> dict:
         })
         if state == "manual":
             manual.append(f"{plugin_id}: {plugin.get('manualStep', 'portable source required')}")
-    return {"stage": "plugins", "mode": "preview", "actions": actions, "manual": manual}
+    installed_count = sum(action["state"] == "installed" for action in actions)
+    missing_count = sum(action["state"] == "missing" for action in actions)
+    summary = f"{installed_count} installed, {missing_count} missing, {len(manual)} manual."
+    return {"stage": "plugins", "mode": "preview", "summary": summary, "actions": actions, "manual": manual}
+
+
+def seed_stage_plan(repo: Path, home: Path, stage: str) -> dict:
+    require_repo(repo)
+    if stage == "plugins":
+        return plugin_seed_plan(repo, home)
+
+    if stage == "check":
+        checks = []
+        version = subprocess.run(["omarchy", "version"], text=True, capture_output=True, check=False) if shutil.which("omarchy") else None
+        checks.append(("Base Omarchy", "ok" if version and version.returncode == 0 else "missing", version.stdout.strip() if version else "omarchy command not found"))
+        checks.append(("Configuration repository", "ok", str(repo)))
+        metadata_path = repo / "metadata/snapshot.json"
+        try:
+            schema = json.loads(metadata_path.read_text()).get("schema")
+            checks.append(("Snapshot schema", "ok" if schema == 1 else "incompatible", str(schema)))
+        except (OSError, ValueError):
+            checks.append(("Snapshot schema", "missing", "apply a snapshot before seeding"))
+        lines = [f"{state.upper()}  {name}\n  {detail}" for name, state, detail in checks]
+        ready = all(state == "ok" for _name, state, _detail in checks)
+        return {"stage": stage, "mode": "preview", "summary": "Compatible base detected." if ready else "Setup checks need attention.", "lines": lines, "ready": ready}
+
+    if stage == "restore":
+        plan = restore_plan(repo, home, include_device=False)
+        lines = [f"{scope.upper()}  {destination}" for _source, destination, scope in plan]
+        summary = f"{len(plan)} portable file change{'s' if len(plan) != 1 else ''} would be restored." if plan else "Portable configuration already matches this machine."
+        return {"stage": stage, "mode": "dry-run", "summary": summary, "lines": lines or ["NOTHING TO DO\n  Portable configuration is already current."], "changes": len(plan)}
+
+    if stage == "packages":
+        if not shutil.which("pacman"):
+            return {"stage": stage, "mode": "preview", "summary": "Package comparison unavailable.", "lines": ["MANUAL\n  pacman is not available on this base system."], "ready": False}
+        installed_result = subprocess.run(["pacman", "-Qq"], text=True, capture_output=True, check=True)
+        installed = set(installed_result.stdout.splitlines())
+        sections = []
+        total = 0
+        for filename, label in (("native.txt", "NATIVE"), ("aur.txt", "AUR / FOREIGN")):
+            path = repo / "manifests" / filename
+            declared = set(path.read_text().splitlines()) if path.is_file() else set()
+            missing = sorted(declared - installed)
+            total += len(missing)
+            sections.append(f"{label}\n  " + ("\n  ".join(missing) if missing else "Nothing missing."))
+        summary = f"{total} package{'s' if total != 1 else ''} missing; installation requires approval." if total else "All declared packages are installed."
+        return {"stage": stage, "mode": "preview", "summary": summary, "lines": sections, "missing": total}
+
+    if stage == "mime":
+        saved = repo / "portable/home/.config/mimeapps.list"
+        current = home / ".config/mimeapps.list"
+        if not saved.is_file():
+            return {"stage": stage, "mode": "preview", "summary": "No MIME defaults were captured.", "lines": ["NOTHING TO APPLY\n  Add .config/mimeapps.list to the allowlist and snapshot first."]}
+        matches = current.is_file() and filecmp.cmp(saved, current, shallow=False)
+        return {"stage": stage, "mode": "preview", "summary": "MIME/application defaults already match." if matches else "MIME/application defaults would change.", "lines": ["CURRENT\n  " + str(current), "SAVED\n  " + str(saved), "RESULT\n  " + ("Nothing to do." if matches else "Preview restoration before applying.")]}
+
+    if stage == "reload":
+        plan = restore_plan(repo, home, include_device=False)
+        destinations = [str(destination.relative_to(home)) for _source, destination, _scope in plan]
+        components = []
+        if any(path.startswith(".config/hypr/") for path in destinations): components.append("Hyprland — reload configuration")
+        if any(path.startswith(".config/omarchy/") for path in destinations): components.append("Omarchy Shell — restart or reload")
+        if any(path.startswith((".config/alacritty/", ".config/foot/", ".config/kitty/", ".config/ghostty/")) for path in destinations): components.append("Terminal — restart running terminal instances")
+        return {"stage": stage, "mode": "preview", "summary": f"{len(components)} component reload{'s' if len(components) != 1 else ''} would be required." if components else "No component reloads are currently required.", "lines": components or ["NOTHING TO DO\n  Restored configuration already matches this machine."]}
+
+    if stage == "report":
+        device_root = repo / "device"
+        device_files = sorted(str(path.relative_to(repo)) for path in device_root.rglob("*") if path.is_file()) if device_root.exists() else []
+        plugin_plan = plugin_seed_plan(repo, home)
+        manual = list(plugin_plan.get("manual", []))
+        lines = ["DEVICE-SPECIFIC — never applied cross-device automatically\n  " + ("\n  ".join(device_files) if device_files else "None captured.")]
+        lines.append("SECRETS\n  SSH/GPG keys, credentials, tokens, keyrings, password stores, cookies, and device secrets must be restored manually.")
+        lines.append("MANUAL PLUGIN STEPS\n  " + ("\n  ".join(manual) if manual else "None."))
+        return {"stage": stage, "mode": "preview", "summary": f"{len(device_files)} device-specific file{'s' if len(device_files) != 1 else ''}; {len(manual)} manual plugin step{'s' if len(manual) != 1 else ''}.", "lines": lines}
+
+    raise SynchroError(f"unknown seed stage: {stage}")
 
 
 def tree_changes(source: Path, destination: Path) -> list[str]:
@@ -455,6 +531,53 @@ def repository_status(repo: Path) -> dict:
         behind, ahead = map(int, counts)
         remote_state = "tracked"
     return {"state": "dirty" if dirty else "clean", "repository": str(repo), "branch": branch, "dirtyFiles": dirty, "ahead": ahead, "behind": behind, "origin": origin, "remoteState": remote_state}
+
+
+def _audit_commit_paths(repo: Path) -> None:
+    for name in COMMIT_PATHS:
+        root = repo / name
+        candidates = [root] if root.is_file() else ([path for path in root.rglob("*") if path.is_file()] if root.is_dir() else [])
+        for path in candidates:
+            relative = PurePosixPath(path.relative_to(repo).as_posix())
+            reason = secret_reason(relative) or content_secret_reason(path)
+            if reason:
+                raise SynchroError(f"refusing to stage suspicious file: {relative} ({reason})")
+
+
+def commit_snapshot(repo: Path, message: str) -> dict:
+    require_repo(repo)
+    message = message.strip()
+    if not message:
+        raise SynchroError("commit message cannot be empty")
+    if len(message) > 200 or any(ord(character) < 32 for character in message):
+        raise SynchroError("commit message must be a single printable line of at most 200 characters")
+    _audit_commit_paths(repo)
+    existing = [name for name in COMMIT_PATHS if (repo / name).exists()]
+    run_git(repo, "add", "--", *existing)
+    staged = run_git(repo, "diff", "--cached", "--quiet", check=False)
+    if staged.returncode == 0:
+        raise SynchroError("no managed snapshot changes are staged for commit")
+    if staged.returncode != 1:
+        raise SynchroError("could not inspect staged snapshot changes")
+    run_git(repo, "commit", "--message", message)
+    revision = run_git(repo, "rev-parse", "HEAD").stdout.strip()
+    return {"commit": revision, "message": message, "repositoryStatus": repository_status(repo)}
+
+
+def push_snapshot(repo: Path) -> dict:
+    require_repo(repo)
+    origin = run_git(repo, "remote", "get-url", "origin", check=False)
+    if origin.returncode != 0:
+        raise SynchroError("cannot push: origin is not configured")
+    branch = run_git(repo, "branch", "--show-current").stdout.strip()
+    if not branch:
+        raise SynchroError("cannot push from a detached HEAD")
+    upstream = run_git(repo, "rev-parse", "--abbrev-ref", "@{upstream}", check=False)
+    if upstream.returncode == 0:
+        run_git(repo, "push", timeout=120)
+    else:
+        run_git(repo, "push", "--set-upstream", "origin", branch, timeout=120)
+    return {"pushed": branch, "origin": origin.stdout.strip(), "repositoryStatus": repository_status(repo)}
 
 
 def test_remote(url: str) -> None:

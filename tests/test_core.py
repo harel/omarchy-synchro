@@ -6,7 +6,7 @@ import subprocess
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from omarchy_synchro.core import SynchroError, collect_plugins, parse_allowlist, plugin_seed_plan, restore_plan, save_selection, secret_reason, snapshot, validate_remote, validate_repo_path
+from omarchy_synchro.core import SynchroError, collect_plugins, commit_snapshot, parse_allowlist, plugin_seed_plan, restore_plan, save_selection, secret_reason, seed_stage_plan, snapshot, validate_remote, validate_repo_path
 
 
 class SafetyTests(unittest.TestCase):
@@ -89,6 +89,27 @@ class SafetyTests(unittest.TestCase):
             (repo/"pending.txt").write_text("review me")
             status=__import__('omarchy_synchro.core',fromlist=['repository_status']).repository_status(repo)
             self.assertIn("?? pending.txt",status["dirtyFiles"])
+
+    def test_commit_stages_only_managed_paths(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo=Path(tmp)/"repo"; subprocess.run(["git","init","-q","-b","main",str(repo)],check=True)
+            subprocess.run(["git","-C",str(repo),"config","user.name","Test"],check=True)
+            subprocess.run(["git","-C",str(repo),"config","user.email","test@example.invalid"],check=True)
+            (repo/"manifests").mkdir(); (repo/"manifests/plugins.json").write_text('{"schema":1,"plugins":[]}')
+            (repo/"unrelated.txt").write_text("do not commit")
+            result=commit_snapshot(repo,"Update snapshot")
+            self.assertTrue(result["commit"])
+            tree=subprocess.run(["git","-C",str(repo),"ls-tree","-r","--name-only","HEAD"],text=True,capture_output=True,check=True).stdout
+            self.assertIn("manifests/plugins.json",tree); self.assertNotIn("unrelated.txt",tree)
+            self.assertIn("?? unrelated.txt",subprocess.run(["git","-C",str(repo),"status","--short"],text=True,capture_output=True,check=True).stdout)
+
+    def test_seed_restore_stage_is_read_only_and_informative(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp); repo=root/"repo"; home=root/"home"; home.mkdir(); subprocess.run(["git","init","-q",str(repo)],check=True)
+            saved=repo/"portable/home/.config/app.conf"; saved.parent.mkdir(parents=True); saved.write_text("saved")
+            report=seed_stage_plan(repo,home,"restore")
+            self.assertEqual(report["mode"],"dry-run"); self.assertEqual(report["changes"],1); self.assertTrue(report["lines"])
+            self.assertFalse((home/".config").exists())
 
 
 if __name__ == "__main__": unittest.main()
