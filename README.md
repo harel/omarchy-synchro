@@ -1,72 +1,166 @@
 # Omarchy Synchro
 
-Omarchy Synchro is a distributable Codex plugin, Omarchy Shell widget/native overlay, and standalone CLI. Reusable source stays in this repository; every user's private snapshot lives in a separately selected Git repository (private or public). You can use this to restore your system on a new machine and keep a backup of your configuration.
+Omarchy Synchro keeps a reviewable backup of your personal Omarchy setup in a separate Git repository. It combines an Omarchy top-bar widget and native dashboard with an optional command-line interface.
+
+Your reusable Synchro plugin and your private configuration are always kept in different repositories.
 
 ![Omarchy Synchro native overlay](assets/omarchy-synchro.png)
 
-## Safety contract
+## What it saves
 
-- Explicit allowlist with mandatory secret-name/content, cache, browser, keyring, nested-Git, and plugin-tree exclusions.
-- Portable and device-specific captures are separated.
-- Snapshot and restore default to previews. Applying either requires `--apply`.
-- Snapshot never stages, commits, or pushes; Git commit and push are separate, explicitly confirmed actions.
-- SSH/HTTPS remotes use existing Git authentication; credential-bearing URLs are rejected.
-- `/usr/share/omarchy` is never captured or modified.
-- Third-party Omarchy plugins are captured as declarations (public origin, revision, enabled state, placement, and settings), never as working trees.
+Synchro captures an explicitly approved selection of configuration rather than copying your entire home directory. A snapshot can include:
 
-## First use
+- Portable application, terminal, Hyprland, MIME and Omarchy configuration.
+- Device-specific monitor and input configuration, stored separately.
+- Native and AUR package lists.
+- Omarchy Shell layout and widget settings.
+- Third-party Omarchy plugin declarations, including public source, revision, enabled state, placement and settings.
+
+It does not copy installed plugin working trees. Private keys, credentials, tokens, browser profiles, cookies, keyrings, password stores, caches and other sensitive/generated state remain excluded.
+
+## New user guide
+
+Once Synchro is installed, normal setup can be completed entirely from the dashboard—no terminal commands are required.
+
+### 1. Open Synchro
+
+Click the Synchro icon in the Omarchy top bar. The **Overview** screen summarizes the selected repository and whether configuration changes are waiting for review.
+
+### 2. Choose where your private configuration will live
+
+Open **Setup** and enter a separate folder for your configuration, for example:
+
+```text
+~/Work/omarchy-config
+```
+
+Click **Select**, then **Initialize**. Synchro creates a new Git repository with a safe starter allowlist. It never initializes or stores personal data inside the reusable plugin repository.
+
+### 3. Connect an optional remote backup
+
+Still in **Setup**, enter the SSH or HTTPS URL of your configuration repository and click **Set origin**. Use **Test access** to verify authentication.
+
+A private remote repository is recommended because snapshots contain personal configuration, even though secrets are excluded. Synchro uses your existing Git/SSH authentication and never stores credentials.
+
+### 4. Create the first snapshot
+
+Open **Snapshot**. The preview distinguishes between:
+
+- **Live configuration changes** that have not yet been copied into the snapshot.
+- **Git repository changes** already captured but still waiting to be committed.
+
+Click **Apply reviewed snapshot** only after checking the preview. Applying a snapshot updates files inside the configuration repository; it does not stage, commit or push them.
+
+### 5. Commit and push separately
+
+Enter a clear commit message and click **Commit snapshot**. Synchro stages only its managed snapshot and policy paths, then asks for confirmation.
+
+Click **Push commits** separately if you want to upload committed history to the configured origin. Snapshot, commit and push are deliberately independent actions.
+
+## Everyday use
+
+1. Open **Snapshot** to see whether live configuration has changed.
+2. Preview and apply the snapshot.
+3. Review the Git changes shown by Synchro or open the repository in a terminal for a full diff.
+4. Commit with a descriptive message.
+5. Push when you are ready.
+
+The **Overview** screen shows the current branch, dirty-file count, ahead/behind counts and remote state.
+
+## Restoring configuration
+
+Open **Restore** to compare saved configuration with the current laptop.
+
+- Restore is a dry run by default.
+- Portable files are selected by default.
+- Device-specific monitor and input files require an explicit opt-in.
+- **Apply reviewed restore** requires confirmation and backs up replaced files first.
+
+Device-specific configuration should only be restored to the same or deliberately approved hardware.
+
+## Moving to a new laptop
+
+The current new-laptop workflow is deliberately staged:
+
+1. Install a compatible base Omarchy system.
+2. Install Omarchy Synchro.
+3. Clone your existing private configuration repository, then select that folder in **Setup**.
+4. Open **Seed** and run **Check**.
+5. Review **Restore**, **Packages**, **Plugins**, **MIME**, **Reload** and **Report**.
+6. Use the dedicated Restore screen to preview and apply portable configuration.
+
+Repository cloning is the one bootstrap operation not yet available in the overlay. Until it is implemented, clone the repository once in a terminal:
 
 ```bash
+git clone <your-private-config-repository> ~/Work/omarchy-config
+```
+
+The Seed buttons currently perform read-only diagnostics:
+
+- **Check** verifies Omarchy, the selected repository and snapshot compatibility.
+- **Restore** reports portable files that would change.
+- **Packages** identifies missing native and AUR packages.
+- **Plugins** reports installed, missing and manual-source Omarchy plugins.
+- **MIME** compares saved application defaults.
+- **Reload** identifies affected components.
+- **Report** lists device-specific files, excluded secrets and manual steps.
+- **Help** restores these explanations in the dashboard.
+
+Package/plugin installation and component reload are not automatic yet. A successful Seed diagnostic means the check completed—it does not mean changes were applied.
+
+## Safety model
+
+- Capture is controlled by an explicit allowlist.
+- Mandatory exclusions protect secret-name/content patterns, browsers, keyrings, password stores, caches, nested Git repositories and installed plugin trees.
+- Portable and device-specific data are separated.
+- Snapshot and restore are preview-first.
+- Snapshot, commit and push are independent and separately confirmed.
+- Credential-bearing remote URLs are rejected.
+- `/usr/share/omarchy` is read-only and never captured or modified.
+- The plugin refuses configuration repositories that overlap its own source or installed plugin paths.
+
+The personal allowlist lives at `policy/allowlist.tsv` inside the selected configuration repository. Advanced users can edit it to approve additional home-relative paths. Hardware-sensitive paths must use the `device` scope.
+
+## Command line — optional
+
+The CLI provides the same core workflows for advanced users and automation. It is not required for ordinary first-time setup.
+
+```bash
+# Select and initialize a separate configuration repository
 bin/omarchy-synchro config select ~/Work/omarchy-config
 bin/omarchy-synchro repo init
+
+# Configure and test origin
 bin/omarchy-synchro repo origin set git@github.com:you/omarchy-config.git
 bin/omarchy-synchro repo origin test
+
+# Preview, then apply a snapshot
 bin/omarchy-synchro snapshot
 bin/omarchy-synchro snapshot --apply
-git -C ~/Work/omarchy-config diff
-```
 
-Edit `policy/allowlist.tsv` in the configuration repository to approve capture sources. Device-sensitive entries must use the `device` scope.
+# Commit and push explicitly
+bin/omarchy-synchro repo commit --message "Update Omarchy configuration"
+bin/omarchy-synchro repo push
 
-Restore is dry-run by default:
-
-```bash
+# Preview, then apply portable restoration
 bin/omarchy-synchro restore
 bin/omarchy-synchro restore --apply
+
+# Inspect an individual Seed stage
+bin/omarchy-synchro seed --stage plugins
 ```
 
-Device data is excluded unless `--include-device` is explicitly supplied.
+Add `--include-device` to restore only when device-specific configuration has been deliberately reviewed.
 
-## Git operations
+## Local development install and uninstall
 
-`repo origin show|set|test|remove` manages only `origin`. Synchro exposes ahead/behind and dirty state. `repo commit --message MESSAGE` stages only managed snapshot/policy paths, and `repo push` pushes committed history; both are separately confirmed in the overlay and neither runs as part of snapshot.
-
-## New laptop seed
-
-`bin/omarchy-synchro seed` reports the staged workflow. Package/plugin installation and component reload stages remain preview-only until separately approved and implemented.
-
-## Local install and uninstall
-
-Run `scripts/install-local` only after both plugin validators and tests pass. `scripts/uninstall-local` removes the Shell integration but preserves the selected configuration repository and `~/.config/omarchy/omarchy-synchro.json`.
-
-## Native overlay
-
-Click the Synchro top-bar widget to open the native dashboard:
-
-- **Overview** summarizes branch, dirty files, ahead/behind counts, remote state, repository path, and origin.
-- **Setup** selects or initializes the configuration repository and sets, replaces, displays, tests, or removes `origin`.
-- **Snapshot** previews capture changes before a separately confirmed apply.
-- **Restore** defaults to a portable-only dry run, with device files opt-in and apply separately confirmed.
-- **Seed** presents the staged new-laptop workflow.
-
-Snapshot manifests include `plugins.json` and `shell.json`. The plugin seed stage identifies installed, missing, and manual-source plugins without installing anything. Local filesystem origins are deliberately omitted and reported as manual steps.
-
-Every Seed screen stage runs a real read-only diagnostic: base/schema compatibility, portable restore delta, missing native/AUR packages, plugin state, MIME-default comparison, required component reloads, or device/secret/manual-step reporting. A successful preview never implies that changes were applied.
-
-## Tests
+Validate before installing a local development checkout:
 
 ```bash
 python -m unittest discover -s tests -v
 omarchy plugin validate omarchy-shell/harel.omarchy-synchro
 python /home/harel/.codex/skills/.system/plugin-creator/scripts/validate_plugin.py .
+scripts/install-local
 ```
+
+`scripts/uninstall-local` removes the Shell integration. It does not delete the selected configuration repository or its history.

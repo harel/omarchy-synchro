@@ -134,7 +134,7 @@ Item {
         snapshotLines.push(pending.length + " pending change" + (pending.length === 1 ? "" : "s") + " awaiting review/commit:")
         for (var g = 0; g < pending.length; g++) snapshotLines.push("  " + String(pending[g]))
       } else snapshotLines.push("Working tree is clean.")
-      snapshotLines.push("", "Synchro never stages, commits, or pushes.")
+      snapshotLines.push("", "Snapshot does not stage, commit, or push. Use the separately confirmed Git controls below.")
       return snapshotLines.join("\n")
     }
     if (data.changes) {
