@@ -1,0 +1,16 @@
+# Scope<TAB>path relative to $HOME. Device-sensitive paths must use device scope.
+portable	.config/alacritty/alacritty.toml
+portable	.config/foot/foot.ini
+portable	.config/ghostty/config
+portable	.config/kitty/kitty.conf
+portable	.config/lazygit/config.yml
+portable	.config/starship.toml
+portable	.config/mimeapps.list
+portable	.config/hypr/bindings.lua
+portable	.config/hypr/looknfeel.lua
+portable	.config/omarchy/extensions
+portable	.config/omarchy/hooks
+portable	.config/omarchy/themes
+device	.config/hypr/monitors.lua
+device	.config/hypr/input.lua
+

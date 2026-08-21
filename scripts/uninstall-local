@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -euo pipefail
+target="$HOME/.config/omarchy/plugins/harel.omarchy-synchro"
+omarchy plugin disable harel.omarchy-synchro 2>/dev/null || true
+if [[ -L "$target" ]]; then unlink -- "$target"; fi
+omarchy-shell shell rescanPlugins 2>/dev/null || true
+printf 'Removed the Shell plugin. The selected configuration repository and user setting were preserved.\n'
+

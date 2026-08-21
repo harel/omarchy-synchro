@@ -1,0 +1,33 @@
+{
+  "name": "omarchy-synchro",
+  "version": "0.1.0+codex.20260821100356",
+  "description": "Safely preview, snapshot, and restore an Omarchy configuration repository.",
+  "author": {
+    "name": "Harel"
+  },
+  "repository": "https://github.com/harel/omarchy-synchro",
+  "license": "MIT",
+  "keywords": [
+    "omarchy",
+    "configuration",
+    "backup",
+    "restore"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Omarchy Synchro",
+    "shortDescription": "Safe, private Omarchy configuration snapshots.",
+    "longDescription": "Manage a separate private configuration repository with allowlisted snapshots, dry-run restoration, Git status, and staged laptop seeding.",
+    "developerName": "Harel",
+    "category": "Productivity",
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Show my Omarchy configuration repository status.",
+      "Preview an Omarchy configuration snapshot.",
+      "Preview restoring my Omarchy configuration."
+    ]
+  }
+}
