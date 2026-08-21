@@ -18,6 +18,24 @@ Synchro captures an explicitly approved selection of configuration rather than c
 
 It does not copy installed plugin working trees. Private keys, credentials, tokens, browser profiles, cookies, keyrings, password stores, caches and other sensitive/generated state remain excluded.
 
+## Install
+
+Install the Omarchy Shell plugin directly from its Git repository:
+
+```bash
+omarchy plugin add https://github.com/harel/omarchy-synchro.git --enable
+```
+
+Omarchy displays its standard warning before cloning third-party code and asks where to place the bar widget. After installation, click the Synchro icon to complete setup in the dashboard.
+
+To remove the Shell plugin later:
+
+```bash
+omarchy plugin remove harel.omarchy-synchro
+```
+
+Removing the plugin does not delete the separately selected configuration repository.
+
 ## New user guide
 
 Once Synchro is installed, normal setup can be completed entirely from the dashboard—no terminal commands are required.
@@ -158,7 +176,7 @@ Validate before installing a local development checkout:
 
 ```bash
 python -m unittest discover -s tests -v
-omarchy plugin validate omarchy-shell/harel.omarchy-synchro
+omarchy plugin validate .
 python /home/harel/.codex/skills/.system/plugin-creator/scripts/validate_plugin.py .
 scripts/install-local
 ```

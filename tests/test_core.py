@@ -14,7 +14,7 @@ class SafetyTests(unittest.TestCase):
         project=Path(__file__).resolve().parents[1]
         with tempfile.TemporaryDirectory() as tmp:
             link=Path(tmp)/"plugin"
-            link.symlink_to(project/"omarchy-shell/harel.omarchy-synchro", target_is_directory=True)
+            link.symlink_to(project, target_is_directory=True)
             result=subprocess.run([str(link/"cli.sh"),"--help"],text=True,capture_output=True)
             self.assertEqual(result.returncode,0,result.stderr)
 

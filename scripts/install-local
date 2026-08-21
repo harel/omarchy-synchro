@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
-source_dir="$root/omarchy-shell/harel.omarchy-synchro"
+source_dir="$root"
 target="$HOME/.config/omarchy/plugins/harel.omarchy-synchro"
 omarchy plugin validate "$source_dir"
 mkdir -p -- "$(dirname -- "$target")"
@@ -10,4 +10,3 @@ ln -sfn -- "$source_dir" "$target"
 omarchy-shell shell rescanPlugins
 omarchy bar put harel.omarchy-synchro --section right
 printf 'Installed harel.omarchy-synchro from %s\n' "$source_dir"
-
