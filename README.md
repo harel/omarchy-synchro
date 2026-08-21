@@ -1,6 +1,6 @@
 # Omarchy Synchro
 
-Omarchy Synchro is a distributable Codex plugin, Omarchy Shell widget/native overlay, and standalone CLI. Reusable source stays in this repository; every user's private snapshot lives in a separately selected Git repository.
+Omarchy Synchro is a distributable Codex plugin, Omarchy Shell widget/native overlay, and standalone CLI. Reusable source stays in this repository; every user's private snapshot lives in a separately selected Git repository (private or public). You can use this to restore your system on a new machine and keep a backup of your configuration.
 
 ![Omarchy Synchro native overlay](assets/omarchy-synchro.png)
 
