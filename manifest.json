@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "id": "harel.omarchy-synchro",
+  "name": "Omarchy Synchro",
+  "version": "0.1.0",
+  "author": "Harel",
+  "license": "MIT",
+  "description": "Safe configuration repository status, snapshot, and restore controls.",
+  "kinds": ["bar-widget", "overlay"],
+  "keepLoaded": true,
+  "entryPoints": { "barWidget": "BarWidget.qml", "overlay": "SynchroOverlay.qml" },
+  "barWidget": { "displayName": "Omarchy Synchro", "category": "System", "allowMultiple": false, "defaultSection": "right" }
+}
