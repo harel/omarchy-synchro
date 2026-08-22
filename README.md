@@ -4,7 +4,7 @@ Omarchy Synchro keeps a reviewable backup of your personal Omarchy setup in a se
 
 Your reusable Synchro plugin and your private configuration are always kept in different repositories.
 
-![Omarchy Synchro native overlay](assets/omarchy-synchro.png)
+![Omarchy Synchro native overlay](preview.png)
 
 ## What it saves
 
