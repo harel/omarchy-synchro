@@ -116,7 +116,7 @@ Item {
     originDraft = origin
     remoteState = String(data.remoteState || "unconfigured")
     repoState = String(data.state || "uninitialized")
-    dirty = (data.dirtyFiles || []).length
+    dirty = Number(data.dirtyFileCount !== undefined ? data.dirtyFileCount : (data.dirtyFiles || []).length)
     ahead = Number(data.ahead || 0)
     behind = Number(data.behind || 0)
   }
@@ -141,10 +141,12 @@ Item {
       } else snapshotLines.push("Captured snapshot is up to date.")
 
       var pending = data.repositoryStatus.dirtyFiles || []
+      var pendingCount = Number(data.repositoryStatus.dirtyFileCount !== undefined ? data.repositoryStatus.dirtyFileCount : pending.length)
       snapshotLines.push("", "GIT REPOSITORY")
-      if (pending.length) {
-        snapshotLines.push(pending.length + " pending change" + (pending.length === 1 ? "" : "s") + " awaiting review/commit:")
+      if (pendingCount) {
+        snapshotLines.push(pendingCount + " pending change" + (pendingCount === 1 ? "" : "s") + " awaiting review/commit:")
         for (var g = 0; g < pending.length; g++) snapshotLines.push("  " + String(pending[g]))
+        if (pendingCount > pending.length) snapshotLines.push("  [" + (pendingCount - pending.length) + " more filenames omitted; use git status in the repository]")
       } else snapshotLines.push("Working tree is clean.")
       snapshotLines.push("", "Snapshot does not stage, commit, or push. Use the separately confirmed Git controls below.")
       return snapshotLines.join("\n")

@@ -147,6 +147,15 @@ class SafetyTests(unittest.TestCase):
             status=__import__('omarchy_synchro.core',fromlist=['repository_status']).repository_status(repo)
             self.assertIn("?? pending.txt",status["dirtyFiles"])
 
+    def test_repository_status_streams_and_bounds_dirty_filenames(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo=Path(tmp)/"repo"; subprocess.run(["git","init","-q","-b","main",str(repo)],check=True)
+            for number in range(350): (repo/f"pending-{number:03}.txt").write_text("x")
+            status=__import__('omarchy_synchro.core',fromlist=['repository_status']).repository_status(repo)
+            self.assertEqual(status["dirtyFileCount"],350)
+            self.assertEqual(len(status["dirtyFiles"]),200)
+            self.assertTrue(status["dirtyFilesTruncated"])
+
     def test_commit_stages_only_managed_paths(self):
         with tempfile.TemporaryDirectory() as tmp:
             repo=Path(tmp)/"repo"; subprocess.run(["git","init","-q","-b","main",str(repo)],check=True)

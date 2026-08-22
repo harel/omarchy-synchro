@@ -30,7 +30,7 @@ BarWidget {
     stdout: SplitParser {
       onRead: function(line) {
         if (line.length > 65536) { root.state="error"; return }
-        try { var d=JSON.parse(line); root.state=d.state||"error"; root.dirty=(d.dirtyFiles||[]).length }
+        try { var d=JSON.parse(line); root.state=d.state||"error"; root.dirty=Number(d.dirtyFileCount !== undefined ? d.dirtyFileCount : (d.dirtyFiles||[]).length) }
         catch(e) { root.state="error" }
       }
     }

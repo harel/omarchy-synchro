@@ -35,6 +35,8 @@ CONTENT_SECRET = re.compile(
     re.IGNORECASE | re.MULTILINE,
 )
 MAX_CAPTURE_FILE_BYTES = 2 * 1024 * 1024
+DIRTY_FILE_DISPLAY_LIMIT = 200
+DIRTY_STATUS_LINE_LIMIT = 4096
 
 
 def utc_now() -> str:
@@ -133,6 +135,38 @@ def run_git(repo: Path, *args: str, check: bool = True, timeout: int = 30) -> su
         raise SynchroError("Git operation timed out") from exc
     except subprocess.CalledProcessError as exc:
         raise SynchroError((exc.stderr or exc.stdout or "Git operation failed").strip()) from exc
+
+
+def stream_git_dirty_status(repo: Path) -> tuple[list[str], int]:
+    """Count Git status entries while retaining only a bounded display sample."""
+    try:
+        process = subprocess.Popen(
+            ["git", "-C", str(repo), "status", "--porcelain=v1", "--untracked-files=all"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+    except FileNotFoundError as exc:
+        raise SynchroError("git is not installed") from exc
+    retained: list[str] = []
+    count = 0
+    assert process.stdout is not None
+    try:
+        with process.stdout:
+            for raw_line in process.stdout:
+                count += 1
+                if len(retained) < DIRTY_FILE_DISPLAY_LIMIT:
+                    retained.append(raw_line.rstrip("\r\n")[:DIRTY_STATUS_LINE_LIMIT])
+        return_code = process.wait(timeout=30)
+    except BaseException:
+        process.kill()
+        process.wait()
+        raise
+    if return_code != 0:
+        raise SynchroError("Git status failed")
+    return retained, count
 
 
 def require_repo(repo: Path) -> None:
@@ -595,9 +629,9 @@ def apply_restore(plan: list[tuple[Path, Path, str]], home: Path, repo: Path) ->
 
 def repository_status(repo: Path) -> dict:
     if not (repo / ".git").is_dir():
-        return {"state": "uninitialized", "repository": str(repo), "branch": None, "dirtyFiles": [], "ahead": 0, "behind": 0, "origin": None, "remoteState": "unconfigured"}
+        return {"state": "uninitialized", "repository": str(repo), "branch": None, "dirtyFiles": [], "dirtyFileCount": 0, "dirtyFilesTruncated": False, "ahead": 0, "behind": 0, "origin": None, "remoteState": "unconfigured"}
     branch = run_git(repo, "branch", "--show-current").stdout.strip() or "detached"
-    dirty = run_git(repo, "status", "--porcelain=v1").stdout.splitlines()
+    dirty, dirty_count = stream_git_dirty_status(repo)
     origin_result = run_git(repo, "remote", "get-url", "origin", check=False)
     origin = origin_result.stdout.strip() if origin_result.returncode == 0 else None
     ahead = behind = 0
@@ -607,7 +641,7 @@ def repository_status(repo: Path) -> dict:
         counts = run_git(repo, "rev-list", "--left-right", "--count", "@{upstream}...HEAD").stdout.split()
         behind, ahead = map(int, counts)
         remote_state = "tracked"
-    return {"state": "dirty" if dirty else "clean", "repository": str(repo), "branch": branch, "dirtyFiles": dirty, "ahead": ahead, "behind": behind, "origin": origin, "remoteState": remote_state}
+    return {"state": "dirty" if dirty_count else "clean", "repository": str(repo), "branch": branch, "dirtyFiles": dirty, "dirtyFileCount": dirty_count, "dirtyFilesTruncated": dirty_count > len(dirty), "ahead": ahead, "behind": behind, "origin": origin, "remoteState": remote_state}
 
 
 def _audit_commit_paths(repo: Path) -> None:
