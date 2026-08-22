@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from omarchy_synchro.core import SynchroError, collect_plugins, commit_snapshot, parse_allowlist, plugin_seed_plan, restore_plan, save_selection, secret_reason, seed_stage_plan, snapshot, validate_remote, validate_repo_path
+from omarchy_synchro.core import SynchroError, apply_restore, collect_plugins, commit_snapshot, parse_allowlist, plugin_seed_plan, restore_plan, save_selection, secret_reason, seed_stage_plan, snapshot, validate_remote, validate_repo_path
 from omarchy_synchro.cli import QML_OUTPUT_LIMIT, encode_qml_payload, qml_safe_payload
 
 
@@ -76,6 +76,45 @@ class SafetyTests(unittest.TestCase):
             source=repo/"portable/home/.config/app/config"; source.parent.mkdir(parents=True); source.write_text("x")
             plan=restore_plan(repo,home)
             self.assertEqual(len(plan),1); self.assertFalse((home/".config").exists())
+
+    def test_restore_rejects_saved_and_destination_symlinks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp); home=root/"home"; repo=root/"repo"; outside=root/"outside"
+            home.mkdir(); outside.mkdir(); (repo/".git").mkdir(parents=True)
+            saved=repo/"portable/home/.config/app.conf"; saved.parent.mkdir(parents=True); saved.write_text("saved")
+            (home/".config").symlink_to(outside, target_is_directory=True)
+            with self.assertRaises(SynchroError): restore_plan(repo,home)
+            (home/".config").unlink(); saved.unlink(); saved.symlink_to(outside/"secret")
+            (outside/"secret").write_text("outside")
+            with self.assertRaises(SynchroError): restore_plan(repo,home)
+
+    def test_restore_revalidates_paths_before_apply(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp); home=root/"home"; repo=root/"repo"; outside=root/"outside"
+            home.mkdir(); outside.mkdir(); (repo/".git").mkdir(parents=True)
+            saved=repo/"portable/home/.config/app.conf"; saved.parent.mkdir(parents=True); saved.write_text("saved")
+            plan=restore_plan(repo,home)
+            saved.unlink(); saved.symlink_to(outside/"secret"); (outside/"secret").write_text("outside")
+            with self.assertRaises(SynchroError): apply_restore(plan,home,repo)
+            self.assertFalse((home/".config/app.conf").exists())
+
+    def test_large_files_never_enter_snapshot(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp); home=root/"home"; repo=root/"repo"
+            home.mkdir(); repo.mkdir(); (repo/".git").mkdir(); (repo/"policy").mkdir()
+            (repo/"policy/allowlist.tsv").write_text("portable\t.config/large.conf\n")
+            source=home/".config/large.conf"; source.parent.mkdir(parents=True); source.write_bytes(b"x" * (2 * 1024 * 1024 + 1))
+            summary,changes=snapshot(repo,home,True)
+            self.assertEqual(summary["files"],0)
+            self.assertFalse((repo/"portable/home/.config/large.conf").exists())
+
+    def test_snapshot_rejects_symlinked_allowlist_components(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp); home=root/"home"; repo=root/"repo"; outside=root/"outside"
+            home.mkdir(); repo.mkdir(); outside.mkdir(); (repo/".git").mkdir(); (repo/"policy").mkdir()
+            (repo/"policy/allowlist.tsv").write_text("portable\t.config/app.conf\n")
+            (home/".config").symlink_to(outside, target_is_directory=True); (outside/"app.conf").write_text("outside")
+            with self.assertRaises(SynchroError): snapshot(repo,home,False)
 
     def test_plugin_manifest_captures_declarations_not_worktrees(self):
         with tempfile.TemporaryDirectory() as tmp:

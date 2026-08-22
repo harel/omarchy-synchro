@@ -6,6 +6,7 @@ import os
 import re
 import shutil
 import socket
+import stat
 import subprocess
 import tempfile
 from dataclasses import dataclass
@@ -33,6 +34,7 @@ CONTENT_SECRET = re.compile(
     rb"https://[^\s/@:]+:[^\s/@]+@",
     re.IGNORECASE | re.MULTILINE,
 )
+MAX_CAPTURE_FILE_BYTES = 2 * 1024 * 1024
 
 
 def utc_now() -> str:
@@ -185,12 +187,54 @@ def secret_reason(relative: PurePosixPath) -> str | None:
 
 def content_secret_reason(path: Path) -> str | None:
     try:
-        if path.stat().st_size > 2 * 1024 * 1024:
-            return None
-        sample = path.read_bytes()
+        if path.stat(follow_symlinks=False).st_size > MAX_CAPTURE_FILE_BYTES:
+            return "file exceeds the 2 MiB inspected-capture limit"
+        with path.open("rb") as stream:
+            sample = stream.read(MAX_CAPTURE_FILE_BYTES + 1)
+        if len(sample) > MAX_CAPTURE_FILE_BYTES:
+            return "file exceeds the 2 MiB inspected-capture limit"
     except OSError:
-        return None
+        return "file could not be safely inspected"
     return "private-key or credential-like content" if CONTENT_SECRET.search(sample) else None
+
+
+def require_contained_regular_file(path: Path, root: Path, *, label: str) -> Path:
+    root = root.resolve(strict=True)
+    try:
+        relative = path.relative_to(root)
+    except ValueError as exc:
+        raise SynchroError(f"{label} escapes its approved root: {path}") from exc
+    current = root
+    for part in relative.parts:
+        current = current / part
+        if current.is_symlink():
+            raise SynchroError(f"{label} contains a symlink: {current}")
+    try:
+        resolved = path.resolve(strict=True)
+        mode = path.stat(follow_symlinks=False).st_mode
+    except OSError as exc:
+        raise SynchroError(f"{label} is not safely readable: {path}") from exc
+    if not resolved.is_relative_to(root) or not stat.S_ISREG(mode):
+        raise SynchroError(f"{label} is not a contained regular file: {path}")
+    return resolved
+
+
+def require_safe_destination(path: Path, home: Path) -> Path:
+    home = home.resolve(strict=True)
+    try:
+        relative = path.relative_to(home)
+    except ValueError as exc:
+        raise SynchroError(f"restore destination escapes the home directory: {path}") from exc
+    if not relative.parts:
+        raise SynchroError("restore destination may not replace the home directory")
+    current = home
+    for part in relative.parts:
+        current = current / part
+        if current.is_symlink():
+            raise SynchroError(f"restore destination contains a symlink: {current}")
+        if current.exists() and not current.resolve(strict=True).is_relative_to(home):
+            raise SynchroError(f"restore destination escapes the home directory: {current}")
+    return path
 
 
 def parse_allowlist(path: Path) -> list[AllowEntry]:
@@ -221,7 +265,8 @@ def iter_source_files(source: Path, relative: PurePosixPath):
     if source.is_symlink():
         raise SynchroError(f"symlink sources are not captured: {relative}")
     if source.is_file():
-        yield source, relative
+        if stat.S_ISREG(source.stat(follow_symlinks=False).st_mode) and not secret_reason(relative) and not content_secret_reason(source):
+            yield source, relative
         return
     if not source.exists():
         return
@@ -239,7 +284,7 @@ def iter_source_files(source: Path, relative: PurePosixPath):
         for name in files:
             candidate = root_path / name
             rel = relative / PurePosixPath(candidate.relative_to(source).as_posix())
-            if candidate.is_symlink() or secret_reason(rel) or content_secret_reason(candidate):
+            if candidate.is_symlink() or not stat.S_ISREG(candidate.stat(follow_symlinks=False).st_mode) or secret_reason(rel) or content_secret_reason(candidate):
                 continue
             yield candidate, rel
 
@@ -250,8 +295,17 @@ def build_snapshot(repo: Path, home: Path, stage: Path) -> dict:
     count = 0
     for entry in entries:
         source = home / Path(entry.relative.as_posix())
-        if source.exists() and overlaps(source, repo):
-            raise SynchroError(f"allowlisted source overlaps configuration repository: {entry.relative}")
+        if source.exists():
+            current = home.resolve(strict=True)
+            for part in source.relative_to(home).parts:
+                current = current / part
+                if current.is_symlink():
+                    raise SynchroError(f"allowlisted source contains a symlink: {entry.relative}")
+            resolved_source = source.resolve(strict=True)
+            if not resolved_source.is_relative_to(home.resolve(strict=True)):
+                raise SynchroError(f"allowlisted source escapes the home directory: {entry.relative}")
+            if overlaps(resolved_source, repo):
+                raise SynchroError(f"allowlisted source overlaps configuration repository: {entry.relative}")
         target_base = stage / ("portable" if entry.scope == "portable" else f"device/{device_id}") / "home"
         for candidate, relative in iter_source_files(source, entry.relative):
             target = target_base / Path(relative.as_posix())
@@ -487,6 +541,8 @@ def snapshot(repo: Path, home: Path, apply: bool) -> tuple[dict, list[str]]:
 
 def restore_plan(repo: Path, home: Path, include_device: bool = False) -> list[tuple[Path, Path, str]]:
     require_repo(repo)
+    repo = repo.resolve(strict=True)
+    home = home.resolve(strict=True)
     roots = [(repo / "portable/home", "portable")]
     if include_device:
         device_id = socket.gethostname().split(".")[0] or "unknown-device"
@@ -495,24 +551,45 @@ def restore_plan(repo: Path, home: Path, include_device: bool = False) -> list[t
     for root, scope in roots:
         if not root.exists():
             continue
-        for source in sorted((p for p in root.rglob("*") if p.is_file()), key=str):
-            rel = source.relative_to(root)
-            destination = home / rel
-            state = "add" if not destination.exists() else ("same" if filecmp.cmp(source, destination, shallow=False) else "modify")
-            if state != "same":
-                plan.append((source, destination, scope))
+        current_root = repo
+        for part in root.relative_to(repo).parts:
+            current_root = current_root / part
+            if current_root.is_symlink():
+                raise SynchroError(f"restore root contains a symlink: {current_root}")
+        if not root.resolve(strict=True).is_relative_to(repo):
+            raise SynchroError(f"restore root is not safely contained in the configuration repository: {root}")
+        for current, dirs, files in os.walk(root, followlinks=False):
+            current_path = Path(current)
+            for name in dirs:
+                candidate = current_path / name
+                if candidate.is_symlink():
+                    raise SynchroError(f"restore snapshot contains a symlink: {candidate}")
+            for name in sorted(files):
+                source = current_path / name
+                safe_source = require_contained_regular_file(source, root, label="restore source")
+                rel = source.relative_to(root)
+                destination = require_safe_destination(home / rel, home)
+                state = "add" if not destination.exists() else ("same" if filecmp.cmp(safe_source, destination, shallow=False) else "modify")
+                if state != "same":
+                    plan.append((safe_source, destination, scope))
     return plan
 
 
-def apply_restore(plan: list[tuple[Path, Path, str]], home: Path) -> Path:
+def apply_restore(plan: list[tuple[Path, Path, str]], home: Path, repo: Path) -> Path:
+    home = home.resolve(strict=True)
+    repo = repo.resolve(strict=True)
     backup = home / ".local/state/omarchy-synchro/backups" / datetime.now().strftime("%Y%m%d-%H%M%S")
     for source, destination, _scope in plan:
+        safe_source = require_contained_regular_file(source, repo, label="restore source")
+        destination = require_safe_destination(destination, home)
         if destination.exists():
             saved = backup / destination.relative_to(home)
+            require_safe_destination(saved, home)
             saved.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(destination, saved)
         destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, destination)
+        require_safe_destination(destination, home)
+        shutil.copy2(safe_source, destination)
     return backup
 
 

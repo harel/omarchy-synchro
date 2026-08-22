@@ -136,7 +136,7 @@ def main(plugin_root: Path | None = None, argv=None) -> int:
             output({"mode": "applied" if args.apply else "preview", "summary": summary, "changes": changes, "repositoryStatus": repository_status(repo), "next": "Review with git diff; Synchro never commits or pushes."}); return 0
         if args.command == "restore":
             plan = restore_plan(repo, home, args.include_device)
-            backup = str(apply_restore(plan, home)) if args.apply and plan else None
+            backup = str(apply_restore(plan, home, repo)) if args.apply and plan else None
             output({"mode": "applied" if args.apply else "dry-run", "changes": [{"source": str(s), "destination": str(d), "scope": scope} for s,d,scope in plan], "backup": backup}); return 0
         if args.command == "seed":
             output(seed_stage_plan(repo, home, args.stage)); return 0

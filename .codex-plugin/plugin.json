@@ -1,6 +1,6 @@
 {
   "name": "omarchy-synchro",
-  "version": "0.1.0+codex.20260822020711",
+  "version": "0.1.0+codex.20260822081617",
   "description": "Safely preview, snapshot, and restore an Omarchy configuration repository.",
   "author": {
     "name": "Harel"
