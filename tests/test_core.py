@@ -3,13 +3,31 @@ import sys
 import tempfile
 import unittest
 import subprocess
+import json
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from omarchy_synchro.core import SynchroError, collect_plugins, commit_snapshot, parse_allowlist, plugin_seed_plan, restore_plan, save_selection, secret_reason, seed_stage_plan, snapshot, validate_remote, validate_repo_path
+from omarchy_synchro.cli import QML_OUTPUT_LIMIT, encode_qml_payload, qml_safe_payload
 
 
 class SafetyTests(unittest.TestCase):
+    def test_qml_output_is_structurally_bounded(self):
+        hostile={"error":"<img src='https://example.invalid/track'>" * 10000,"dirtyFiles":["x" * 10000] * 1000}
+        encoded=encode_qml_payload(hostile)
+        self.assertLessEqual(len(encoded.encode("utf-8")),QML_OUTPUT_LIMIT)
+        self.assertLessEqual(len(qml_safe_payload(hostile)["dirtyFiles"]),201)
+
+    def test_qml_untrusted_sinks_are_plain_and_streamed(self):
+        project=Path(__file__).resolve().parents[1]
+        overlay=(project/"SynchroOverlay.qml").read_text()
+        bar=(project/"BarWidget.qml").read_text()
+        self.assertNotIn("StdioCollector",overlay)
+        self.assertNotIn("StdioCollector",bar)
+        for binding in ("text: root.repository;", "text: root.origin ||", "text: root.message;", "text: outputPanel.content ||"):
+            line=next(line for line in overlay.splitlines() if binding in line)
+            self.assertIn("textFormat: Text.PlainText",line)
+
     def test_shell_wrapper_resolves_symlink_install(self):
         project=Path(__file__).resolve().parents[1]
         with tempfile.TemporaryDirectory() as tmp:

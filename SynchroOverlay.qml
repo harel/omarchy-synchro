@@ -76,8 +76,11 @@ Item {
     action = nextAction
     actionFailed = false
     message = "Working…"
-    process.captured = ""
-    process.command = [cli].concat(args)
+    process.capturedStdout = ""
+    process.capturedStderr = ""
+    process.outputBytes = 0
+    process.outputTruncated = false
+    process.command = [cli, "--qml"].concat(args)
     process.running = true
   }
 
@@ -322,7 +325,7 @@ Item {
 
               Item { width: 1; height: Style.space(8) }
               Rectangle { width: parent.width; height: 1; color: Util.alpha(root.border, 0.6) }
-              Text { width: parent.width; text: root.repository; color: root.muted; font.family: root.fontFamily; font.pixelSize: Style.font.caption; elide: Text.ElideMiddle }
+              Text { width: parent.width; text: root.repository; textFormat: Text.PlainText; color: root.muted; font.family: root.fontFamily; font.pixelSize: Style.font.caption; elide: Text.ElideMiddle }
               Text { text: root.repoState === "clean" ? "● Clean" : (root.repoState === "dirty" ? "● Changes pending" : "● Setup required"); color: root.repoState === "clean" ? root.accent : root.urgent; font.family: root.fontFamily; font.pixelSize: Style.font.caption }
             }
           }
@@ -403,8 +406,8 @@ Item {
                       anchors.margins: Style.space(16)
                       spacing: Style.space(8)
                       Text { text: "Configuration repository"; color: root.muted; font.family: root.fontFamily; font.pixelSize: Style.font.caption }
-                      Text { width: parent.width; text: root.repository; color: root.foreground; font.family: "monospace"; font.pixelSize: Style.font.body; elide: Text.ElideMiddle }
-                      Text { width: parent.width; text: root.origin || "No origin configured"; color: root.muted; font.family: "monospace"; font.pixelSize: Style.font.bodySmall; elide: Text.ElideMiddle }
+                      Text { width: parent.width; text: root.repository; textFormat: Text.PlainText; color: root.foreground; font.family: "monospace"; font.pixelSize: Style.font.body; elide: Text.ElideMiddle }
+                      Text { width: parent.width; text: root.origin || "No origin configured"; textFormat: Text.PlainText; color: root.muted; font.family: "monospace"; font.pixelSize: Style.font.bodySmall; elide: Text.ElideMiddle }
                     }
                   }
 
@@ -502,7 +505,7 @@ Item {
                   anchors.margins: Style.space(9)
                   spacing: Style.space(8)
                   Text { text: process.running ? "󰑓" : (root.actionFailed ? "󰅙" : "󰄬"); color: root.actionFailed ? root.urgent : root.accent; font.family: root.fontFamily; font.pixelSize: Style.font.body }
-                  Text { width: parent.width - Style.space(32); text: root.message; color: root.actionFailed ? root.urgent : root.muted; font.family: root.fontFamily; font.pixelSize: Style.font.caption; elide: Text.ElideRight }
+                  Text { width: parent.width - Style.space(32); text: root.message; textFormat: Text.PlainText; color: root.actionFailed ? root.urgent : root.muted; font.family: root.fontFamily; font.pixelSize: Style.font.caption; elide: Text.ElideRight }
                 }
               }
             }
@@ -588,11 +591,29 @@ Item {
 
   Process {
     id: process
-    property string captured: ""
-    stdout: StdioCollector { waitForEnd: true; onStreamFinished: process.captured = text.trim() }
-    stderr: StdioCollector { waitForEnd: true; onStreamFinished: if (text.trim() !== "") process.captured = text.trim() }
+    property string capturedStdout: ""
+    property string capturedStderr: ""
+    property int outputBytes: 0
+    property bool outputTruncated: false
+    readonly property int outputLimit: 65536
+    function capture(line, isError) {
+      if (outputTruncated) return
+      var chunk = String(line || "")
+      var remaining = outputLimit - outputBytes
+      if (chunk.length > remaining) {
+        chunk = chunk.substring(0, Math.max(0, remaining))
+        outputTruncated = true
+      }
+      outputBytes += chunk.length
+      if (isError) capturedStderr += chunk
+      else capturedStdout += chunk
+    }
+    stdout: SplitParser { onRead: function(line) { process.capture(line, false) } }
+    stderr: SplitParser { onRead: function(line) { process.capture(line, true) } }
     onExited: function(exitCode) {
-      var raw = process.captured
+      var raw = process.outputTruncated
+        ? '{"error":"Plugin output exceeded the safe UI limit. Run the CLI for full details."}'
+        : (process.capturedStderr.trim() !== "" ? process.capturedStderr.trim() : process.capturedStdout.trim())
       var data = root.parse(raw)
       root.actionFailed = exitCode !== 0 || (data !== null && data.error !== undefined)
       var rendered = root.friendlyOutput(data, raw)
@@ -639,12 +660,12 @@ Item {
       anchors.fill: parent
       anchors.margins: Style.space(14)
       spacing: Style.space(10)
-      Text { text: outputPanel.title.toUpperCase(); color: outputPanel.muted; font.family: outputPanel.fontFamily; font.pixelSize: Style.font.caption }
+      Text { text: outputPanel.title.toUpperCase(); textFormat: Text.PlainText; color: outputPanel.muted; font.family: outputPanel.fontFamily; font.pixelSize: Style.font.caption }
       Flickable {
         width: parent.width; height: parent.height - Style.space(30)
         contentWidth: width; contentHeight: outputText.implicitHeight
         clip: true; boundsBehavior: Flickable.StopAtBounds
-        Text { id: outputText; width: parent.width; text: outputPanel.content || "Run a preview to see changes here."; color: outputPanel.foreground; font.family: "monospace"; font.pixelSize: Style.font.bodySmall; wrapMode: Text.WrapAnywhere }
+        Text { id: outputText; width: parent.width; text: outputPanel.content || "Run a preview to see changes here."; textFormat: Text.PlainText; color: outputPanel.foreground; font.family: "monospace"; font.pixelSize: Style.font.bodySmall; wrapMode: Text.WrapAnywhere }
       }
     }
   }
